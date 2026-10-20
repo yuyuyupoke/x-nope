@@ -6,12 +6,12 @@ html.xnope-sending [data-testid="mask"] {
   transition: none !important;
 }
 
-/* 見えないメニューをユーザーが誤ってクリックしないように、メニュー本体の当たり判定も消す。
-   拡張からのクリックは dispatchEvent なので pointer-events の影響を受けない。
-   mask は残す（誤ってクリックしてもメニューが閉じるだけで済む）。 */
-html.xnope-sending [data-testid="Dropdown"],
-html.xnope-sending [role="menu"] {
-  pointer-events: none !important;
+/* 当たり判定（pointer-events）は消さない。消すと X がクリックを受け付けなくなる（2026-10 実測）。
+   見えないメニューへのユーザーの誤クリックは content.js 側で止めている。 */
+
+/* 送信待ちのセル。見えなくするだけで、高さと当たり判定は残す（X に「…」メニューを開かせるため）。 */
+.xnope-pending {
+  opacity: 0 !important;
 }
 
 /* 消したセル。高さを完全に潰す。 */

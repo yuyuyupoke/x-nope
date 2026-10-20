@@ -1,7 +1,7 @@
 {
   "manifest_version": 3,
   "name": "x-nope",
-  "version": "0.2.0",
+  "version": "0.2.1",
   "description": "X のタイムラインで、カーソルを乗せて x キーを押すだけで「興味なし」を送信する。送信できたかをネットワーク観測で確認する。",
   "content_scripts": [
     {

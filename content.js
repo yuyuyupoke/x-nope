@@ -10,13 +10,17 @@
   'use strict';
 
   const SEND_INTERVAL = 300;   // 連続送信の間隔(ms)
-  const MENU_TIMEOUT  = 1500;  // メニュー出現の待ち上限(ms)
+  const MENU_TIMEOUT  = 3000;  // メニュー出現の待ち上限(ms)
   const TOAST_MS      = 3200;
   const VERIFY_TIMEOUT = 2500; // 送信リクエストの観測を待つ上限(ms)
   const LOG_LIMIT     = 300;   // 送信ログの保持件数
   const KILL_LIMIT    = 2000;  // 記憶する非表示ツイートの上限
   const UNDO_LIMIT    = 50;    // ⌘Z で戻せる件数
   const UNDO_KEY = /Mac|iPhone|iPad/.test(navigator.platform || navigator.userAgent) ? '⌘Z' : 'Ctrl+Z';
+
+  // 「興味なし」の送信を示す操作名。2026-10 の実測では /i/api/2/timeline/feedback.json への POST。
+  // 同じ時間帯にタイムライン更新（timeline.json）やログ（log.json）も飛ぶので、操作名で絞らないと誤判定する。
+  const NOT_INTERESTED_OP = /feedback/i;
 
   // 「興味なし」として採用してよいラベル
   const TARGET_LABELS = [
@@ -234,6 +238,20 @@
   // ---------------------------------------------------------------- 送信
 
   const MENU_SELECTOR = '[role="menu"], [data-testid="Dropdown"]';
+  const isSending = () => document.documentElement.classList.contains('xnope-sending');
+
+  // 送信中のメニューは透明なだけで、当たり判定は残っている（消すと X がクリックを受け付けない）。
+  // ユーザーの実クリック（isTrusted）が見えない項目（フォローやミュート）に当たらないよう、
+  // 送信中はメニュー内への実操作を止める。拡張からのクリックは isTrusted=false なので止まらない。
+  for (const type of ['pointerdown', 'pointerup', 'mousedown', 'mouseup', 'click', 'touchstart', 'touchend']) {
+    addEventListener(type, e => {
+      if (!e.isTrusted || !isSending()) return;
+      if (e.target instanceof Element && e.target.closest(MENU_SELECTOR)) {
+        e.preventDefault();
+        e.stopImmediatePropagation();
+      }
+    }, { capture: true });
+  }
 
   function closeMenu() {
     for (const target of [document, document.body]) {
@@ -293,11 +311,13 @@
       realClick(items[idx]);
 
       const ev = await waitFor(
-        () => netEvents.find(e => e.t >= t0 - 100), VERIFY_TIMEOUT, 40);
+        () => netEvents.find(e => e.t >= t0 - 100 && NOT_INTERESTED_OP.test(e.op)), VERIFY_TIMEOUT, 40);
 
       if (!ev) {
+        const seen = [...new Set(netEvents.filter(e => e.t >= t0 - 100).map(e => e.op))];
+        if (seen.length) log('興味なし以外の送信だけ観測:', seen);
         return {
-          ok: false, label: labels[idx],
+          ok: false, label: labels[idx], seen,
           reason: 'メニュー項目は押したが、送信リクエストが観測されなかった',
         };
       }
@@ -347,12 +367,14 @@
     const cell = cellOf(article);
     if (!cell) return;
     if (id && killed.has(id)) return;      // 二重処理を防ぐ
-    if (cell.classList.contains('xnope-gone')) return;
+    if (cell.classList.contains('xnope-gone') || cell.classList.contains('xnope-pending')) return;
 
-    // 楽観的に即座に消す。送信の完了は待たない。
-    hideCell(cell);
+    // すぐ見えなくするが、送信が終わるまでは高さを潰さない。
+    // 潰したり当たり判定を消したりすると、X が「…」メニューを開かなくなる（2026-10 実測）。
+    cell.classList.add('xnope-pending');
     if (id) { killed.add(id); persist(); }
-    undoStack.push({ cell, id });
+    const entry = { cell, id, undone: false };
+    undoStack.push(entry);
     if (undoStack.length > UNDO_LIMIT) undoStack.shift();
 
     const n = bumpCounter();
@@ -361,6 +383,9 @@
 
     enqueue(async () => {
       const res = await sendNotInterested(article);
+      // 送れたかどうかに関わらず、ここで初めて高さを潰す（⌘Z で戻されていなければ）
+      if (!entry.undone) hideCell(cell);
+      cell.classList.remove('xnope-pending');
       writeLog({
         t: Date.now(), id, ok: !!res.ok,
         op: res.op ?? null, status: res.status ?? null, reason: res.reason ?? null,
@@ -389,7 +414,8 @@
   function undo() {
     const last = undoStack.pop();
     if (!last) return;
-    last.cell.classList.remove('xnope-gone');
+    last.undone = true;
+    last.cell.classList.remove('xnope-gone', 'xnope-pending');
     if (last.id) { killed.delete(last.id); persist(); }
     toast('表示を戻した <span class="xnope-hint">送信済みのシグナルは取り消せない</span>');
   }
@@ -400,7 +426,15 @@
   addEventListener('mousemove', e => { mx = e.clientX; my = e.clientY; }, { passive: true, capture: true });
 
   addEventListener('keydown', e => {
-    if (!e.isTrusted || isTyping()) return;   // ページ側が合成したキー入力では動かない
+    if (!e.isTrusted) return;   // ページ側が合成したキー入力では動かない
+
+    // 送信中にフォーカスが見えないメニューにあるとき、Enter / Space で項目を選ばせない
+    if (isSending() && (e.key === 'Enter' || e.key === ' ') && document.activeElement?.closest?.(MENU_SELECTOR)) {
+      e.preventDefault();
+      e.stopImmediatePropagation();
+      return;
+    }
+    if (isTyping()) return;
 
     // ⌘Z（Windows は Ctrl+Z）で直前の非表示を戻す
     if ((e.metaKey || e.ctrlKey) && !e.shiftKey && !e.altKey && e.key.toLowerCase() === 'z') {
