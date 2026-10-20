@@ -12,7 +12,7 @@
   const SEND_INTERVAL = 300;   // 連続送信の間隔(ms)
   const MENU_TIMEOUT  = 3000;  // メニュー出現の待ち上限(ms)
   const TOAST_MS      = 3200;
-  const VERIFY_TIMEOUT = 2500; // 送信リクエストの観測を待つ上限(ms)
+  const VERIFY_TIMEOUT = 4000; // 送信リクエストの観測を待つ上限(ms)
   const LOG_LIMIT     = 300;   // 送信ログの保持件数
   const KILL_LIMIT    = 2000;  // 記憶する非表示ツイートの上限
   const UNDO_LIMIT    = 50;    // ⌘Z で戻せる件数
@@ -87,6 +87,31 @@
       const Ctor = type.startsWith('pointer') && typeof PointerEvent === 'function' ? PointerEvent : MouseEvent;
       try { el.dispatchEvent(new Ctor(type, base)); } catch { /* 個々の失敗は無視 */ }
     }
+  }
+
+  // その要素が画面上の自分の位置に実際に表示され、クリックが当たる状態か。
+  // X は当たり判定のとれない要素へのクリックを無視する（2026-10 実測）。
+  function isHittable(el) {
+    if (!el.isConnected) return false;
+    const r = el.getBoundingClientRect();
+    if (!r.width || !r.height) return false;
+    const x = r.left + r.width / 2, y = r.top + r.height / 2;
+    if (x < 0 || y < 0 || x > innerWidth || y > innerHeight) return false;
+    const hit = document.elementFromPoint(x, y);
+    return !!hit && (hit === el || el.contains(hit));
+  }
+
+  // 当たり判定がとれ、位置が止まるまで待つ（メニューは出た直後しばらく動いている）
+  function waitClickable(el, timeout) {
+    let prev = null;
+    return waitFor(() => {
+      if (!isHittable(el)) { prev = null; return false; }
+      const r = el.getBoundingClientRect();
+      const pos = Math.round(r.left) + ',' + Math.round(r.top);
+      const settled = pos === prev;
+      prev = pos;
+      return settled;
+    }, timeout, 40);
   }
 
   function isTyping() {
@@ -306,28 +331,46 @@
 
       // ここから先が「本当に送れたか」の検証。
       // 項目をクリックしても React に届いていなければリクエストは飛ばない。
+      const target = items[idx];
+      // メニューは出た直後の約 0.1 秒、位置が動いていてクリックが当たらない。止まってから押す
+      await waitClickable(target, 1000);
+
       netEvents.length = 0;
       const t0 = Date.now();
-      realClick(items[idx]);
+      const sent = () => netEvents.find(e => e.t >= t0 - 100 && NOT_INTERESTED_OP.test(e.op));
+      realClick(target);
+      let clicks = 1;
 
-      const ev = await waitFor(
-        () => netEvents.find(e => e.t >= t0 - 100 && NOT_INTERESTED_OP.test(e.op)), VERIFY_TIMEOUT, 40);
+      // X は押された項目を処理するとメニューを閉じる。閉じないまま送信も見えなければ、
+      // クリックが無視されたとみなして同じ項目を押し直す（最大 2 回）
+      for (let retry = 0; retry < 2; retry++) {
+        if (await waitFor(() => sent() || !menu.isConnected, 700, 40)) break;
+        if (!target.isConnected) break;
+        await waitClickable(target, 500);
+        log('クリックが無視されたので押し直す:', retry + 1);
+        realClick(target);
+        clicks++;
+      }
+
+      const ev = await waitFor(sent, VERIFY_TIMEOUT, 40);
+      // 失敗の原因を後から追えるように残す（押した回数・メニューが閉じたか）
+      const diag = { clicks, menuClosed: !menu.isConnected };
 
       if (!ev) {
         const seen = [...new Set(netEvents.filter(e => e.t >= t0 - 100).map(e => e.op))];
         if (seen.length) log('興味なし以外の送信だけ観測:', seen);
         return {
-          ok: false, label: labels[idx], seen,
+          ok: false, label: labels[idx], seen, ...diag,
           reason: 'メニュー項目は押したが、送信リクエストが観測されなかった',
         };
       }
       if (ev.status < 200 || ev.status >= 300) {
         return {
-          ok: false, label: labels[idx], op: ev.op, status: ev.status,
+          ok: false, label: labels[idx], op: ev.op, status: ev.status, ...diag,
           reason: `送信したが X が HTTP ${ev.status} を返した`,
         };
       }
-      return { ok: true, label: labels[idx], op: ev.op, status: ev.status };
+      return { ok: true, label: labels[idx], op: ev.op, status: ev.status, ...diag };
     } catch (e) {
       return { ok: false, reason: String(e && e.message || e) };
     } finally {
@@ -389,6 +432,7 @@
       writeLog({
         t: Date.now(), id, ok: !!res.ok,
         op: res.op ?? null, status: res.status ?? null, reason: res.reason ?? null,
+        clicks: res.clicks ?? null, menuClosed: res.menuClosed ?? null, seen: res.seen ?? null,
       });
 
       if (res.ok) {
