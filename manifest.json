@@ -1,0 +1,22 @@
+{
+  "manifest_version": 3,
+  "name": "x-nope",
+  "version": "0.2.0",
+  "description": "X のタイムラインで、カーソルを乗せて x キーを押すだけで「興味なし」を送信する。送信できたかをネットワーク観測で確認する。",
+  "content_scripts": [
+    {
+      "matches": ["https://x.com/*", "https://twitter.com/*"],
+      "js": ["net.js"],
+      "run_at": "document_start",
+      "world": "MAIN",
+      "all_frames": false
+    },
+    {
+      "matches": ["https://x.com/*", "https://twitter.com/*"],
+      "js": ["content.js"],
+      "css": ["style.css"],
+      "run_at": "document_idle",
+      "all_frames": false
+    }
+  ]
+}

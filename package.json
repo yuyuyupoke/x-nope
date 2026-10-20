@@ -1,0 +1,11 @@
+{
+  "name": "x-nope",
+  "version": "0.2.0",
+  "private": true,
+  "description": "X のタイムラインで x キーを押すだけで「興味なし」を送る Chrome 拡張",
+  "license": "MIT",
+  "scripts": {
+    "test": "node test/match.test.js",
+    "zip": "sh scripts/zip.sh"
+  }
+}

@@ -1,0 +1,78 @@
+/* 送信中だけドロップダウンを不可視にする。 */
+html.xnope-sending [data-testid="Dropdown"],
+html.xnope-sending [role="menu"],
+html.xnope-sending [data-testid="mask"] {
+  opacity: 0 !important;
+  transition: none !important;
+}
+
+/* 見えないメニューをユーザーが誤ってクリックしないように、メニュー本体の当たり判定も消す。
+   拡張からのクリックは dispatchEvent なので pointer-events の影響を受けない。
+   mask は残す（誤ってクリックしてもメニューが閉じるだけで済む）。 */
+html.xnope-sending [data-testid="Dropdown"],
+html.xnope-sending [role="menu"] {
+  pointer-events: none !important;
+}
+
+/* 消したセル。高さを完全に潰す。 */
+.xnope-gone {
+  height: 0 !important;
+  min-height: 0 !important;
+  max-height: 0 !important;
+  overflow: hidden !important;
+  margin: 0 !important;
+  padding: 0 !important;
+  border: 0 !important;
+  opacity: 0 !important;
+  pointer-events: none !important;
+}
+
+/* トースト */
+#xnope-toasts {
+  position: fixed;
+  right: 16px;
+  bottom: 16px;
+  z-index: 2147483647;
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  align-items: flex-end;
+  pointer-events: none;
+  font-family: -apple-system, BlinkMacSystemFont, "Hiragino Sans", "Segoe UI", sans-serif;
+}
+.xnope-toast {
+  background: rgba(21, 32, 43, 0.96);
+  color: #e7e9ea;
+  border: 1px solid rgba(255, 255, 255, 0.16);
+  border-radius: 10px;
+  padding: 9px 13px;
+  font-size: 13px;
+  line-height: 1.45;
+  box-shadow: 0 6px 20px rgba(0, 0, 0, 0.35);
+  max-width: 340px;
+  animation: xnope-in 0.14s ease-out;
+}
+.xnope-toast .xnope-hint {
+  opacity: 0.6;
+  font-size: 12px;
+}
+.xnope-toast.xnope-warn {
+  background: rgba(80, 30, 16, 0.96);
+  border-color: rgba(255, 150, 100, 0.35);
+}
+@keyframes xnope-in {
+  from { opacity: 0; transform: translateY(6px); }
+  to   { opacity: 1; transform: translateY(0); }
+}
+@media (prefers-color-scheme: light) {
+  .xnope-toast {
+    background: rgba(255, 255, 255, 0.98);
+    color: #0f1419;
+    border-color: rgba(0, 0, 0, 0.14);
+  }
+  .xnope-toast.xnope-warn {
+    background: rgba(255, 240, 234, 0.98);
+    color: #6b2410;
+    border-color: rgba(200, 90, 40, 0.35);
+  }
+}
